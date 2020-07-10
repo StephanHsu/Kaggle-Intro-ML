@@ -46,74 +46,104 @@ logit_grid <- modelo_log_reg %>%
   parameters() %>%
   grid_max_entropy(size = 100)
 
+
+# Métricas de ajuste do modelo
+# multimetric <- metric_set(accuracy,
+#                           kap,
+#                           bal_accuracy,
+#                           sens,
+#                           yardstick::spec,
+#                           precision,
+#                           recall,
+#                           ppv,
+#                           npv,
+#                           roc_auc)
+
+
 # Ajustando o modelo com cross-validation
 adults_tune_grid <-  tune_grid(
     log_reg_workflow,
     resamples = adults_cv,
     grid = logit_grid,
-    metrics = metric_set(accuracy),
+    metrics = metric_set(roc_auc),
     control = control_grid(verbose = TRUE, allow_par = FALSE))
 
 # Verificando o ajuste do modelo
 autoplot(adults_tune_grid)
 collect_metrics(adults_tune_grid)
-show_best(adults_tune_grid, "accuracy")
+show_best(adults_tune_grid, "roc_auc")
 
 # Selecionando o melhor modelo
-adults_best_params <- select_best(adults_tune_grid, "accuracy")
-adults_model <- log_reg_workflow %>% finalize_workflow(adult_best_params)
+adults_best_params <- select_best(adults_tune_grid, "roc_auc")
+adults_wf <- log_reg_workflow %>% finalize_workflow(adults_best_params)
 
-adults_last_fit <- last_fit(adults_model, adults_split)
+# Construindo o modelo
+adults_last_fit <- last_fit(adults_wf, adults_split)
 
+# Variáveis importantes
+adults_model <- adults_last_fit$.workflow[[1]]$fit$fit
+vip::vip(adults_model)
+collect_metrics(adults_last_fit)
 
-# Incluindo as previsões na base
-adults_train_pred <- adults_train %>%
+# Salvando o modelo
+write_rds(adults_last_fit, "Output/adults_last_fit.rds")
+write_rds(adults_model, "Output/adults_model.rds")
+
+# Predições
+adults_pred <- collect_predictions(adults_last_fit)
+
+# Curva ROC
+adults_pred %>%
+  roc_curve(resposta, `.pred_>50K`) %>%
+  autoplot()
+
+# Matriz de confusão
+adults_pred %>% yardstick::conf_mat(resposta, .pred_class)
+
+# risco por faixa de score
+adults_pred %>%
   mutate(
-    pred = predict(adults_model, new_data = .)$.pred_class,
-    prob = predict(adults_model, new_data = ., type = "prob")$`.pred_>50K`
-  )
+    score =  factor(ntile(.pred_class, 10))
+  ) %>%
+  count(score, resposta) %>%
+  ggplot(aes(x = score, y = n, fill = resposta)) +
+  geom_col(position = "fill") +
+  geom_label(aes(label = n), position = "fill") +
+  coord_flip()
 
-# Métricas de ajuste do modelo
-multimetric <- metric_set(accuracy,
-                          kap,
-                          bal_accuracy,
-                          sens,
-                          yardstick::spec,
-                          precision,
-                          recall,
-                          ppv,
-                          npv)
-
-adults_train_pred %>% multimetric(truth = resposta, estimate = pred)
-adults_train_pred %>% roc_auc(truth = resposta, prob)
-
-# aplicando na base teste
-adults_test <- adults_recipe %>% bake(adults_test)
-adults_test_pred <- adults_test %>%
+# gráfico sobre os da classe "bad"
+percentis = 20
+adults_pred %>%
   mutate(
-    pred = predict(adults_model, new_data = .)$.pred_class,
-    prob = predict(adults_model, new_data = ., type = "prob")$`.pred_>50K`
-  )
+    score = factor(ntile(.pred_class, percentis))
+  ) %>%
+  filter(resposta == ">50K") %>%
+  group_by(score) %>%
+  summarise(
+    n = n(),
+    media = mean(.pred_class)
+  ) %>%
+  mutate(p = n/sum(n)) %>%
+  ggplot(aes(x = p, y = score)) +
+  geom_col() +
+  geom_label(aes(label = scales::percent(p))) +
+  geom_vline(xintercept = 1/percentis, colour = "red", linetype = "dashed", size = 1)
 
-adults_test_pred %>% multimetric(truth = resposta, estimate = pred)
-adults_test_pred %>% roc_auc(truth = resposta, prob)
 
+# Salvando o modelo final
+adults_final_model <- fit(adults_wf, adults)
+write_rds(adults_final_model, "Output/adults_final_model.rds")
 
-# Salvando workflow e modelo
-saveRDS(adults_model, "adults_model.RDS")
-
-
-# Fazendo previsão --------------------------------------------------------
+# Previsão numa nova base -------------------------------------------------
 
 # Lendo a base para previsão
-submit <- readRDS("intro-ml-mestre-master/dados/dados_kaggle/adult_val.rds")
+submit <- readRDS("Data/adult_val.rds")
 id <- submit$id
 resposta <- submit$resposta
-submit <- adults_recipe %>% bake(submit %>% select(-resposta))
-submit_pred <- submit %>%
+submit_pred <- submit %>% select(-resposta) %>%
   mutate(
-    pred = predict(adults_model, new_data = .)$.pred_class,
-    prob = predict(adults_model, new_data = ., type = "prob")$`.pred_>50K`
+    pred = predict(adults_final_model, new_data = .)$.pred_class,
+    prob = predict(adults_final_model, new_data = ., type = "prob")$`.pred_>50K`
   )
 
 submit_final <- tibble(id = id,
@@ -122,3 +152,8 @@ submit_final <- tibble(id = id,
        resposta = factor(resposta))
 
 submit_final %>% accuracy(truth = resposta, estimate = resposta_pred)
+
+# Salvando as previsões
+submit_final %>%
+  select(id,more_than_50K) %>%
+  write.table("Output/submission.csv", row.names = FALSE, dec = ".", sep = ",")

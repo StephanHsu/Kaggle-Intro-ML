@@ -145,27 +145,3 @@ adults_pred %>%
 # Salvando o modelo final
 adults_final_model <- fit(adults_wf, adults)
 write_rds(adults_final_model, "Output/adults_final_model_xgb.rds")
-
-# Previsão numa nova base -------------------------------------------------
-
-# Lendo a base para previsão
-submit <- readRDS("Data/adult_val.rds")
-id <- submit$id
-resposta <- submit$resposta
-submit_pred <- submit %>% select(-resposta) %>%
-  mutate(
-    pred = predict(adults_final_model, new_data = .)$.pred_class,
-    prob = predict(adults_final_model, new_data = ., type = "prob")$`.pred_>50K`
-  )
-
-submit_final <- tibble(id = id,
-       more_than_50K = submit_pred$prob,
-       resposta_pred = factor(submit_pred$pred),
-       resposta = factor(resposta))
-
-submit_final %>% accuracy(truth = resposta, estimate = resposta_pred)
-
-# Salvando as previsões
-submit_final %>%
-  select(id,more_than_50K) %>%
-  write.table("Output/submission_xgb.csv", row.names = FALSE, dec = ".", sep = ",")

@@ -20,9 +20,12 @@ adults_cv <- vfold_cv(adults_train, v = 5)
 
 # Feature Engine ----------------------------------------------------------
 adults_recipe <- recipe(resposta ~ ., data = adults_train) %>%
-  step_rm(education, native_country, capital_loss, fnlwgt, id, skip = TRUE) %>%
-  step_center(all_predictors(), -all_nominal()) %>%
-  step_unknown(all_predictors(), -all_numeric()) %>%
+  step_modeimpute(workclass, occupation, native_country) %>%
+  step_zv(all_predictors()) %>%
+  step_novel(all_nominal(), -all_outcomes()) %>%
+  # step_rm(education, native_country, capital_loss, fnlwgt, id, skip = TRUE) %>%
+  step_normalize(all_predictors(), -all_nominal()) %>%
+  # step_unknown(all_predictors(), -all_numeric()) %>%
   step_dummy(all_predictors(), -all_numeric())
   # step_log(capital_gain)
 
@@ -83,11 +86,11 @@ adults_tune_grid <-  tune_grid(
 # Verificando o ajuste do modelo
 autoplot(adults_tune_grid)
 collect_metrics(adults_tune_grid)
-show_best(adults_tune_grid, "roc_auc")
+show_best(adults_tune_grid, "roc_auc") # 0.924
 
 # Selecionando o melhor modelo
 adults_best_params <- select_best(adults_tune_grid, "roc_auc")
-adults_wf <- log_reg_workflow %>% finalize_workflow(adults_best_params)
+adults_wf <- xgb_wf %>% finalize_workflow(adults_best_params)
 
 # Construindo o modelo
 adults_last_fit <- last_fit(adults_wf, adults_split)
@@ -98,8 +101,8 @@ vip::vip(adults_model)
 collect_metrics(adults_last_fit)
 
 # Salvando o modelo
-write_rds(adults_last_fit, "Output/adults_last_fit_xgb.rds")
-write_rds(adults_model, "Output/adults_model_xgb.rds")
+write_rds(adults_last_fit, "Output/adults_last_fit_xgb_v2.rds")
+write_rds(adults_model, "Output/adults_model_xgb_v2.rds")
 
 # Predições
 adults_pred <- collect_predictions(adults_last_fit)
@@ -144,4 +147,4 @@ adults_pred %>%
 
 # Salvando o modelo final
 adults_final_model <- fit(adults_wf, adults)
-write_rds(adults_final_model, "Output/adults_final_model_xgb.rds")
+write_rds(adults_final_model, "Output/adults_final_model_xgb_v2.rds")

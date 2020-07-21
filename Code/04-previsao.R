@@ -9,7 +9,7 @@ library(rsample)
 # Definindo o modelo
 # adults_final_model.rds -> regressão logística
 # adults_final_model_xgb.rds -> xgboost
-adults_final_model <- readRDS("Output/adults_final_model_xgb.rds")
+adults_final_model <- readRDS("Output/adults_final_model_xgb_v2.rds")
 
 # Lendo a base para previsão
 submit <- readRDS("Data/adult_val.rds")
@@ -27,8 +27,9 @@ submit_final <- tibble(id = id,
                        resposta = factor(resposta))
 
 submit_final %>% accuracy(truth = resposta, estimate = resposta_pred)
+submit_final %>% roc_auc(truth = resposta, more_than_50K)
 
 # Salvando as previsões
 submit_final %>%
   select(id,more_than_50K) %>%
-  write.table("Output/submission.csv", row.names = FALSE, dec = ".", sep = ",")
+  write.table("Output/submission_xgb_v2.csv", row.names = FALSE, dec = ".", sep = ",")
